@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>우리 동네 아파트 실거래가 대시보드</title>
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js (CDN) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- PapaParse (CSV 파싱용 CDN) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        /* 기본 폰트 및 배경색 설정 */
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .card-shadow {
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+    </style>
+</head>
+<body class="text-gray-800">
+
+    <div class="max-w-7xl mx-auto px-4 py-8">
+        <!-- 대시보드 제목 -->
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold text-gray-900 border-b-2 border-indigo-500 pb-2 inline-block">우리 동네 아파트 실거래가 대시보드</h1>
+            <p class="text-sm text-gray-500 mt-2" id="last-updated">데이터를 불러오는 중입니다...</p>
+        </header>
+
+        <!-- 요약 정보 카드 (건수, 평균, 최고, 최저) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="bg-white rounded-lg p-6 card-shadow border-l-4 border-blue-500">
+                <p class="text-sm text-gray-500 font-medium mb-1">전체 거래 건수</p>
+                <p class="text-2xl font-bold text-gray-900" id="summary-count">-</p>
+            </div>
+            <div class="bg-white rounded-lg p-6 card-shadow border-l-4 border-green-500">
+                <p class="text-sm text-gray-500 font-medium mb-1">평균 거래가격</p>
+                <p class="text-2xl font-bold text-gray-900" id="summary-avg">-</p>
+            </div>
+            <div class="bg-white rounded-lg p-6 card-shadow border-l-4 border-red-500">
+                <p class="text-sm text-gray-500 font-medium mb-1">최고 거래가격</p>
+                <p class="text-2xl font-bold text-gray-900" id="summary-max">-</p>
+            </div>
+            <div class="bg-white rounded-lg p-6 card-shadow border-l-4 border-yellow-500">
+                <p class="text-sm text-gray-500 font-medium mb-1">최저 거래가격</p>
+                <p class="text-2xl font-bold text-gray-900" id="summary-min">-</p>
+            </div>
+        </div>
+
+        <!-- 월별 평균 거래가격 차트 영역 -->
+        <div class="bg-white rounded-lg p-6 card-shadow mb-8">
+            <h2 class="text-xl font-bold mb-4 text-gray-800">월별 평균 거래가격 추이</h2>
+            <div class="relative h-72 md:h-96 w-full">
+                <canvas id="monthlyChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 거래 목록 테이블 영역 -->
+        <div class="bg-white rounded-lg card-shadow overflow-hidden">
+            <div class="p-6 border-b border-gray-200">
+                <h2 class="text-xl font-bold text-gray-800">상세 거래 목록</h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-gray-50 text-gray-700 text-sm uppercase font-semibold">
+                        <tr>
+                            <th class="py-3 px-4 border-b">거래일자</th>
+                            <th class="py-3 px-4 border-b">아파트명</th>
+                            <th class="py-3 px-4 border-b">법정동</th>
+                            <th class="py-3 px-4 border-b">전용면적(㎡)</th>
+                            <th class="py-3 px-4 border-b">층</th>
+                            <th class="py-3 px-4 border-b text-right">거래금액(만원)</th>
+                            <th class="py-3 px-4 border-b text-right">건축년도</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body" class="text-sm divide-y divide-gray-200">
+                        <!-- 데이터가 이곳에 동적으로 삽입됩니다 -->
+                        <tr>
+                            <td colspan="7" class="py-8 text-center text-gray-500">데이터를 로딩 중입니다...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 푸터 영역 (사용자 요청 사항 반영) -->
+        <footer class="mt-12 mb-6 text-center text-sm text-gray-400">
+            © 2026 with dream consulting. All Rights Reserved.
+        </footer>
+    </div>
+
+    <script>
+        // 구글 시트 CSV 데이터 URL
+        const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTOvldilUBuOtJ7zcB8IyMjaEfxyn3NElJWr3hZ0cniwtu3zkc83UzNsbyeB7Dk4XMDTeb8YZqsCyc8/pub?gid=649778418&single=true&output=csv';
+
+        // 숫자를 콤마 포맷으로 변경하는 유틸리티 함수 (예: 10000 -> 10,000)
+        function formatNumber(num) {
+            return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        }
+
+        // 거래금액 문자열에서 콤마를 제거하고 숫자로 변환하는 유틸리티 함수
+        function parsePrice(priceStr) {
+            if (!priceStr) return 0;
+            return parseInt(priceStr.toString().replace(/,/g, ''), 10) || 0;
+        }
+
+        // 날짜 문자열에서 'YYYY-MM' 형식의 월 정보를 추출하는 유틸리티 함수
+        function extractMonth(dateStr) {
+            if (!dateStr) return '알수없음';
+            // 보통 YYYY-MM-DD 또는 YYYY.MM.DD 또는 YYYYMMDD 형태를 띰
+            const cleaned = dateStr.replace(/[^0-9]/g, '');
+            if (cleaned.length >= 6) {
+                return cleaned.substring(0, 4) + '-' + cleaned.substring(4, 6);
+            }
+            return dateStr;
+        }
+
+        // 데이터 로드 및 파싱 (PapaParse 라이브러리 사용)
+        Papa.parse(CSV_URL, {
+            download: true,
+            header: true,
+            skipEmptyLines: true,
+            transformHeader: function(header) {
+                return header.trim(); // 헤더 공백 제거 (버그 방지)
+            },
+            complete: function(results) {
+                const data = results.data;
+                processData(data);
+                document.getElementById('last-updated').innerText = `총 ${data.length}건의 데이터를 성공적으로 불러왔습니다.`;
+            },
+            error: function(err) {
+                console.error('데이터 로드 실패:', err);
+                document.getElementById('last-updated').innerText = '데이터를 불러오는 데 실패했습니다.';
+                document.getElementById('table-body').innerHTML = '<tr><td colspan="7" class="py-8 text-center text-red-500">데이터 로드 오류가 발생했습니다.</td></tr>';
+            }
+        });
+
+        // 파싱된 데이터를 처리하여 대시보드 업데이트
+        function processData(data) {
+            let totalCount = 0;
+            let totalPrice = 0;
+            let maxPrice = 0;
+            let minPrice = Infinity;
+            
+            const monthlyData = {};
+            const tableBody = document.getElementById('table-body');
+            tableBody.innerHTML = ''; // 기존 로딩 메시지 제거
+
+            // 데이터 순회하며 통계 계산 및 테이블 행 생성
+            data.forEach(row => {
+                // 주요 키 추출 (헤더 이름이 정확히 일치해야 함)
+                const date = row['거래일자'] || '';
+                const name = row['아파트명'] || '';
+                const dong = row['법정동'] || '';
+                const area = row['전용면적(㎡)'] || row['전용면적'] || '';
+                const floor = row['층'] || '';
+                const priceStr = row['거래금액(만원)'] || row['거래금액'] || '0';
+                const year = row['건축년도'] || '';
+
+                const price = parsePrice(priceStr);
+
+                // 유효한 거래금액이 있는 경우에만 통계에 포함
+                if (price > 0) {
+                    totalCount++;
+                    totalPrice += price;
+                    if (price > maxPrice) maxPrice = price;
+                    if (price < minPrice) minPrice = price;
+
+                    // 월별 통계 데이터 적재
+                    const month = extractMonth(date);
+                    if (!monthlyData[month]) {
+                        monthlyData[month] = { sum: 0, count: 0 };
+                    }
+                    monthlyData[month].sum += price;
+                    monthlyData[month].count++;
+                }
+
+                // 테이블 행 생성
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-gray-50 transition-colors';
+                tr.innerHTML = `
+                    <td class="py-3 px-4 border-b whitespace-nowrap">${date}</td>
+                    <td class="py-3 px-4 border-b font-medium text-gray-900">${name}</td>
+                    <td class="py-3 px-4 border-b">${dong}</td>
+                    <td class="py-3 px-4 border-b text-gray-600">${area}</td>
+                    <td class="py-3 px-4 border-b">${floor}</td>
+                    <td class="py-3 px-4 border-b text-right font-semibold text-indigo-600">${formatNumber(price)}</td>
+                    <td class="py-3 px-4 border-b text-right text-gray-500">${year}</td>
+                `;
+                tableBody.appendChild(tr);
+            });
+
+            // 데이터가 없을 경우 처리
+            if (totalCount === 0) {
+                minPrice = 0;
+                tableBody.innerHTML = '<tr><td colspan="7" class="py-8 text-center text-gray-500">유효한 데이터가 없습니다.</td></tr>';
+            }
+
+            // 요약 카드 업데이트
+            const avgPrice = totalCount > 0 ? Math.round(totalPrice / totalCount) : 0;
+            
+            // 카운팅 애니메이션 등 적용 없이 즉시 렌더링
+            document.getElementById('summary-count').innerText = `${formatNumber(totalCount)} 건`;
+            document.getElementById('summary-avg').innerText = `${formatNumber(avgPrice)} 만원`;
+            document.getElementById('summary-max').innerText = `${formatNumber(maxPrice)} 만원`;
+            document.getElementById('summary-min').innerText = `${formatNumber(minPrice)} 만원`;
+
+            // 차트 렌더링 함수 호출
+            renderChart(monthlyData);
+        }
+
+        // Chart.js를 사용한 월별 평균 거래가격 차트 렌더링
+        function renderChart(monthlyData) {
+            // 월(Month) 순서대로 정렬
+            const sortedMonths = Object.keys(monthlyData).sort();
+            
+            const labels = [];
+            const dataPoints = [];
+
+            sortedMonths.forEach(month => {
+                labels.push(month);
+                const avg = monthlyData[month].sum / monthlyData[month].count;
+                dataPoints.push(Math.round(avg));
+            });
+
+            const ctx = document.getElementById('monthlyChart').getContext('2d');
+            
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: '월별 평균 거래가격 (만원)',
+                        data: dataPoints,
+                        borderColor: '#6366f1', // Indigo-500
+                        backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                        borderWidth: 2,
+                        pointBackgroundColor: '#ffffff',
+                        pointBorderColor: '#6366f1',
+                        pointBorderWidth: 2,
+                        pointRadius: 4,
+                        fill: true,
+                        tension: 0.3 // 곡선 부드럽게
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false // 범례 숨김 (제목이 역할을 대신함)
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return '평균: ' + formatNumber(context.parsed.y) + ' 만원';
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            ticks: {
+                                callback: function(value) {
+                                    return formatNumber(value) + '만'; // Y축 단위 포맷
+                                }
+                            },
+                            grid: {
+                                color: '#f3f4f6'
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
